@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard</title>
+    <link rel="stylesheet" th:href="@{/css/dashboard.css}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <!-- Header fragment -->
+    <div th:replace="fragments/header :: header"></div>
+
+    <div class="dashboard-main">
+        <h2 style="margin: 10px; padding-left: 25px;">Dashboard</h2>
+        <div class="dashboard-grid">
+            <!-- Row 1: Metric cards -->
+            <div class="dashboard-card metric-card temp-card">
+                <div class="card-title">Temperature <span>🌡️</span></div>
+                <div class="card-reading">
+                    <span class="card-value" id="temperature" th:text="${temperature} ?: '--'">--</span>
+                    <span class="card-unit">°C</span>
+                </div>
+            </div>
+            <div class="dashboard-card metric-card hum-card">
+                <div class="card-title">Humidity <span>💧</span></div>
+                <div class="card-reading">
+                    <span class="card-value" id="humidity" th:text="${humidity} ?: '--'">--</span>
+                    <span class="card-unit">%</span>
+                </div>
+            </div>
+            <div class="dashboard-card metric-card light-card">
+                <div class="card-title">Light <span>🌞</span></div>
+                <div class="card-reading">
+                    <span class="card-value" id="lightLevel" th:text="${light} ?: '--'">--</span>
+                    <span class="card-unit">Lux</span>
+                </div>
+            </div>
+            <div class="dashboard-card device-card">
+                <div class="card-title device-title">Device Control <img class="device-cloud" src="/images/cloud.png" alt="cloud"></div>
+                <div class="device-control-group">
+                    <div class="device-control-row">
+                        <span class="device-label">Điều hòa</span>
+                        <label class="switch">
+                            <input type="checkbox" id="airToggle" onchange="toggleDevice('air', this.checked)">
+                            <span class="slider"></span>
+                        </label>
+                        <img id="airIcon" class="device-icon" src="/images/AirCon_Not.png" alt="Air Conditioner">
+                    </div>
+                    <div class="device-control-row">
+                        <span class="device-label">Quạt</span>
+                        <label class="switch">
+                            <input type="checkbox" id="fanToggle" onchange="toggleDevice('fan', this.checked)">
+                            <span class="slider"></span>
+                        </label>
+                        <img id="fanIcon" class="device-icon" src="/images/Fan_notAc.png" alt="Fan">
+                    </div>
+                    <div class="device-control-row">
+                        <span class="device-label">Đèn</span>
+                        <label class="switch">
+                            <input type="checkbox" id="lightToggle" onchange="toggleDevice('light', this.checked)">
+                            <span class="slider"></span>
+                        </label>
+                        <img id="lightIcon" class="device-icon" src="/images/Light_notAct.png" alt="Light">
+                    </div>
+                </div>
+                <div id="cmdStatus" class="cmd-status">Chưa gửi lệnh</div>
+            </div>
+
+            <!-- Row 2: Chart wrappers (only containers for now) -->
+            <div class="chart-wrapper chart-wrapper-temp-hum">
+                <div class="dashboard-chart chart-temp-hum">
+                    <canvas id="tempHumChart"></canvas>
+                </div>
+            </div>
+            <div class="chart-wrapper chart-wrapper-light">
+                <div class="dashboard-chart chart-light">
+                    <canvas id="lightChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="dashboard-info">
+            <div>Thời gian: <span id="timestamp">--</span></div>
+            <div>Room: <span id="room" th:text="${room} ?: 'room1'">room1</span></div>
+        </div>
+    </div>
+
+    <script th:inline="javascript">
+        /*<![CDATA[*/
+        document.addEventListener('DOMContentLoaded', () => {
+            const url = new URL(`/api/data_sensor/stream/${document.getElementById('room').textContent || 'room1'}`, window.location.origin);
+            console.log('Connecting SSE to:', url.href);
+
+            const es = new EventSource(url.href /* , { withCredentials: true } */);
+
+            es.onopen = () => console.log('SSE open');
+
+            // nếu server không đặt name cho event thì onmessage sẽ nhận
+            es.onmessage = (e) => {
+                console.log('onmessage:', e.data);
+                try {
+                    const d = JSON.parse(e.data);
+                    update(d);
+                } catch (err) {
+                    console.warn('non-JSON message:', e.data);
+                }
+            };
+
+            // nếu server dùng .name("sensor")
+            es.addEventListener('sensor', (e) => {
+                console.log('sensor event:', e.data);
+                update(JSON.parse(e.data));
+            });
+
+            es.onerror = (e) => {
+                console.error('SSE error', e);
+                // không close, để browser auto-reconnect
+            };
+
+            // Chart setup
+            const MAX_POINTS = 10; // giữ lại N điểm gần nhất
+
+            const tempHumCtx = document.getElementById('tempHumChart').getContext('2d');
+            const lightCtx   = document.getElementById('lightChart').getContext('2d');
+
+            // Prepare initial data from server (if any)
+            // latestTenForDashboard is injected server-side as an array of objects
+            const serverSeed = /*[[${latestTenForDashboard}]]*/ [];
+            // sort ascending by timestamp
+            serverSeed.sort(function(a,b){ return new Date(a.timestamp) - new Date(b.timestamp); });
+            console.log('serverSeed (preloaded):', serverSeed);
+
+            const tempHumChart = new Chart(tempHumCtx, {
+                type: 'line',
+                data: {
+                    labels: serverSeed.map(p => new Date(p.timestamp).toLocaleTimeString()),
+                    datasets: [
+                        { label: 'Temperature (°C)', data: serverSeed.map(p => p.temperature), borderColor: '#e05656', backgroundColor: 'rgba(224,86,86,.25)', tension: .3, pointRadius: 3 },
+                        { label: 'Humidity (%)',     data: serverSeed.map(p => p.humidity), borderColor: '#33b5ff', backgroundColor: 'rgba(51,181,255,.25)', tension: .3, pointRadius: 3 }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    scales: {
+                        x: { ticks: { maxRotation: 50, minRotation: 50 } },
+                        y: { beginAtZero: false }
+                    },
+                    plugins: { legend: { position: 'top' } }
+                }
+            });
+
+            const lightChart = new Chart(lightCtx, {
+                type: 'line',
+                data: {
+                    labels: serverSeed.map(p => new Date(p.timestamp).toLocaleTimeString()),
+                    datasets: [
+                        { label: 'Light (Lux)', data: serverSeed.map(p => p.lightLevel), borderColor: '#c9a800', backgroundColor: 'rgba(201,168,0,.25)', tension: .3, pointRadius: 3 }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    scales: { x: { ticks: { maxRotation: 50, minRotation: 50 } }, y: { beginAtZero: false } },
+                    plugins: { legend: { position: 'top' } }
+                }
+            });
+
+            function pushPoint(chart, label, values) {
+                chart.data.labels.push(label);
+                chart.data.datasets.forEach((ds, i) => {
+                    ds.data.push(values[i]);
+                });
+                if (chart.data.labels.length > MAX_POINTS) {
+                    chart.data.labels.shift();
+                    chart.data.datasets.forEach(ds => ds.data.shift());
+                }
+                chart.update();
+            }
+
+            function fmtTime(ts) {
+                try {
+                    const d = ts ? new Date(ts) : new Date();
+                    const hh = String(d.getHours()).padStart(2,'0');
+                    const mm = String(d.getMinutes()).padStart(2,'0');
+                    const ss = String(d.getSeconds()).padStart(2,'0');
+                    return `${hh}:${mm}:${ss}`;
+                } catch { return '--:--:--'; }
+            }
+
+            function update(d) {
+                // chấp nhận cả hai kiểu tên field
+                const t  = d.temperature ?? d.temp;
+                const h  = d.humidity    ?? d.hum;
+                const lx = d.lightLevel  ?? d.lux;
+                const ts = d.timestamp   ?? d.ts;
+
+                if (t != null) temperature.textContent = t;
+                if (h != null) humidity.textContent = h;
+                if (lx != null) lightLevel.textContent = lx;
+                timestamp.textContent = ts ?? '--';
+
+                const label = fmtTime(ts);
+                if (t != null && h != null) {
+                    pushPoint(tempHumChart, label, [t, h]);
+                }
+                if (lx != null) {
+                    pushPoint(lightChart, label, [lx]);
+                }
+            }
+        });
+
+        async function toggleDevice(device, isOn) {
+            const room = 'room1';
+            const action = isOn ? 'on' : 'off';
+            const url = `/dashboard/${room}/${device}/${action}`;
+
+            cmdStatus.textContent = `Đang gửi: ${device} -> ${action}...`;
+
+            try {
+                const res  = await fetch(url, { method: 'POST' });
+                const data = await res.json().catch(() => ({}));
+                cmdStatus.textContent = res.ok
+                    ? `OK: ${device} -> ${action} (${data.status ?? ''})`
+                    : `Lỗi ${res.status}`;
+                // Cập nhật icon tương ứng theo trạng thái
+                updateDeviceIcon(device, isOn);
+            } catch (e) {
+                cmdStatus.textContent = 'Gửi lệnh thất bại!';
+                console.error(e);
+            }
+        }
+
+        function updateDeviceIcon(device, isOn) {
+            const map = {
+                air:  { el: airIcon,  on: '/images/AirCon_Active.png', off: '/images/AirCon_Not.png' },
+                fan:  { el: fanIcon,  on: '/images/Fan_Act.png',       off: '/images/Fan_notAc.png' },
+                light:{ el: lightIcon,on: '/images/Light_act.png',     off: '/images/Light_notAct.png' }
+            };
+            const item = map[device];
+            if (!item) return;
+            item.el.classList.remove('active','inactive');
+            // hiệu ứng mờ dần rồi đổi ảnh
+            item.el.style.opacity = '0';
+            setTimeout(() => {
+                item.el.src = isOn ? item.on : item.off;
+                item.el.style.opacity = '1';
+                item.el.classList.add(isOn ? 'active' : 'inactive');
+            }, 120);
+        }
+        /*]]>*/
+    </script>
+</body>
+</html>
+

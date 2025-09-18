@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+	<head>
+		<meta charset="UTF-8" />
+		<title>Profile</title>
+		<link rel="stylesheet" href="/css/profile.css" />
+		
+	</head>
+	<body>
+		<div th:replace="fragments/header :: header"></div>
+
+		<main class="profile-page">
+			<article class="profile-card">
+				<div class="card-top">
+					<div class="avatar" aria-hidden="true" style="background-image: url('/images/cafbaed4-4c49-454f-aa67-187c715d9c27.jpg');"></div>
+					<h2 class="profile-name">Nguyễn Bá Cường</h2>
+				</div>
+				<div class="profile-body">
+					<div class="codes">B22DCCN096 - D22HTTT06</div>
+
+					<div class="profile-row">
+						<div class="muted">Email:</div>
+						<div><a href="mailto:CUONGNB.B22CN096@stu.ptit.edu.vn">CUONGNB.B22CN096@stu.ptit.edu.vn</a></div>
+					</div>
+
+					<div class="profile-row">
+						<div class="muted">Phone:</div>
+						<div>0988253401</div>
+					</div>
+
+					<div class="profile-row">
+						<div class="muted">Github:</div>
+						<div><a href="https://github.com/abcxyz123">NBCIOT.github.com</a></div>
+					</div>
+
+					<div class="profile-row">
+						<div class="muted" style="font-size: 15px;">Download PDF:</div>
+						<div><a href="/files/iot.pdf">NBCIOT.pdf</a></div>
+					</div>
+
+				</div>
+			</article>
+		</main>
+	</body>
+	</html>
